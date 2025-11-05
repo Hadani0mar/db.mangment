@@ -1,8 +1,10 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextRequest, NextResponse } from 'next/server';
-import sql from 'mssql';
+import { connectToDatabase, closeConnection } from '@/lib/db-connection';
 
 export async function POST(request: NextRequest) {
+  let pool = null;
+  
   try {
     const supabase = await createClient()
     
@@ -17,29 +19,24 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { server, user: dbUser, password, database } = body;
+    const { server, user: dbUser, password, database, port } = body;
 
     // إنشاء اتصال مؤقت ببيانات المستخدم
-    const config: sql.config = {
+    pool = await connectToDatabase({
       user: dbUser || 'sa',
       password: password || '',
       server: server || 'localhost',
       database: database || 'master',
-      options: {
-        encrypt: false,
-        trustServerCertificate: true,
-        enableArithAbort: true,
-      },
-    };
-
-    const pool = await sql.connect(config);
+      port: port || 1433,
+    });
     
     // الحصول على معلومات قاعدة البيانات
     const versionResult = await pool.request().query('SELECT @@VERSION AS version');
     const serverNameResult = await pool.request().query('SELECT @@SERVERNAME AS serverName');
     const dbNameResult = await pool.request().query('SELECT DB_NAME() AS databaseName');
     
-    await pool.close();
+    await closeConnection(pool);
+    pool = null;
 
     const version = versionResult.recordset[0]?.version || '';
     const serverName = serverNameResult.recordset[0]?.serverName || server || 'Unknown';
@@ -94,6 +91,10 @@ export async function POST(request: NextRequest) {
     });
   } catch (error: any) {
     console.error('خطأ في الاتصال:', error);
+    
+    // إغلاق الاتصال في حالة الخطأ
+    await closeConnection(pool);
+    
     return NextResponse.json(
       {
         success: false,

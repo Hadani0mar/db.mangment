@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import sql from "mssql";
+import { connectToDatabase, closeConnection } from '@/lib/db-connection';
 
 export async function POST(request: NextRequest) {
+  let pool = null;
+  
   try {
     const supabase = await createClient();
     const {
@@ -221,22 +223,20 @@ WHERE AF.DaysApproved > 0
 ORDER BY [مدة_نفاذ_المخزون] ASC;
     `;
 
-    // الاتصال بقاعدة البيانات
-    const config: sql.config = {
+    // الاتصال بقاعدة البيانات باستخدام الإعدادات المحسّنة
+    pool = await connectToDatabase({
       user: connectionData.username,
       password: connectionData.password_encrypted,
       server: connectionData.server_address,
       database: connectionData.database_name,
-      options: {
-        encrypt: false,
-        trustServerCertificate: true,
-        enableArithAbort: true,
-      },
-    };
-
-    const pool = await sql.connect(config);
+      port: 1433,
+    });
+    
     const result = await pool.request().query(query);
-    await pool.close();
+    
+    // إغلاق الاتصال قبل إرجاع النتيجة
+    await closeConnection(pool)
+    pool = null
 
     return NextResponse.json({
       success: true,
@@ -244,12 +244,19 @@ ORDER BY [مدة_نفاذ_المخزون] ASC;
     });
   } catch (error: unknown) {
     console.error("Error executing required items report:", error);
+    
+    // إغلاق الاتصال في حالة الخطأ
+    await closeConnection(pool)
+    
     const errorMessage =
       error instanceof Error ? error.message : "حدث خطأ غير متوقع";
     return NextResponse.json(
       { success: false, message: errorMessage },
       { status: 500 }
     );
+  } finally {
+    // التأكد من إغلاق الاتصال في النهاية
+    await closeConnection(pool)
   }
 }
 

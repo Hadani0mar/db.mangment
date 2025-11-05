@@ -1,8 +1,10 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextRequest, NextResponse } from 'next/server'
-import sql from 'mssql'
+import { connectToDatabase, closeConnection } from '@/lib/db-connection'
 
 export async function POST(request: NextRequest) {
+  let pool = null;
+  
   try {
     const supabase = await createClient()
     
@@ -36,20 +38,14 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { filters = {} } = body
 
-    // إنشاء اتصال بقاعدة البيانات
-    const config: sql.config = {
+    // إنشاء اتصال بقاعدة البيانات باستخدام الإعدادات المحسّنة
+    pool = await connectToDatabase({
       user: connectionData.username,
       password: connectionData.password_encrypted,
       server: connectionData.server_address,
       database: connectionData.database_name,
-      options: {
-        encrypt: false,
-        trustServerCertificate: true,
-        enableArithAbort: true,
-      },
-    }
-
-    const pool = await sql.connect(config)
+      port: 1433,
+    })
     
     // استعلام المنتجات الموشكة على النفاذ
     const query = `
@@ -95,12 +91,20 @@ export async function POST(request: NextRequest) {
 
     console.log('Sending response with data count:', formattedData.length);
 
+    // إغلاق الاتصال قبل إرجاع النتيجة
+    await closeConnection(pool)
+    pool = null
+
     return NextResponse.json({
       success: true,
       data: formattedData,
     })
   } catch (error: any) {
     console.error('Error executing low stock report:', error)
+    
+    // إغلاق الاتصال في حالة الخطأ
+    await closeConnection(pool)
+    
     return NextResponse.json(
       {
         success: false,
@@ -109,6 +113,9 @@ export async function POST(request: NextRequest) {
       },
       { status: 500 }
     )
+  } finally {
+    // التأكد من إغلاق الاتصال في النهاية
+    await closeConnection(pool)
   }
 }
 

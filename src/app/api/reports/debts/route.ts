@@ -1,8 +1,10 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextRequest, NextResponse } from 'next/server'
-import sql from 'mssql'
+import { connectToDatabase, closeConnection } from '@/lib/db-connection'
 
 export async function POST(request: NextRequest) {
+  let pool = null;
+  
   try {
     const supabase = await createClient()
     
@@ -36,20 +38,14 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { filters = {} } = body
 
-    // إنشاء اتصال بقاعدة البيانات
-    const config: sql.config = {
+    // إنشاء اتصال بقاعدة البيانات باستخدام الإعدادات المحسّنة
+    pool = await connectToDatabase({
       user: connectionData.username,
       password: connectionData.password_encrypted,
       server: connectionData.server_address,
       database: connectionData.database_name,
-      options: {
-        encrypt: false,
-        trustServerCertificate: true,
-        enableArithAbort: true,
-      },
-    }
-
-    const pool = await sql.connect(config)
+      port: 1433,
+    })
     
     // بناء الاستعلام مع الفلاتر
     let query = `
@@ -112,9 +108,15 @@ export async function POST(request: NextRequest) {
           SALES.Data_CustomerPaymentAppointments cpa
     `
 
-    const statsPool = await sql.connect(config)
+    const statsPool = await connectToDatabase({
+      user: connectionData.username,
+      password: connectionData.password_encrypted,
+      server: connectionData.server_address,
+      database: connectionData.database_name,
+      port: 1433,
+    })
     const statsResult = await statsPool.request().query(statsQuery)
-    await statsPool.close()
+    await closeConnection(statsPool)
 
     console.log('Stats result:', statsResult.recordset[0]);
 
@@ -147,6 +149,10 @@ export async function POST(request: NextRequest) {
 
     console.log('Sending response with data count:', formattedData.length);
 
+    // إغلاق الاتصال قبل إرجاع النتيجة
+    await closeConnection(pool)
+    pool = null
+
     return NextResponse.json({
       success: true,
       data: formattedData,
@@ -154,6 +160,10 @@ export async function POST(request: NextRequest) {
     })
   } catch (error: any) {
     console.error('Error executing debts report:', error)
+    
+    // إغلاق الاتصال في حالة الخطأ
+    await closeConnection(pool)
+    
     return NextResponse.json(
       {
         success: false,
@@ -162,6 +172,9 @@ export async function POST(request: NextRequest) {
       },
       { status: 500 }
     )
+  } finally {
+    // التأكد من إغلاق الاتصال في النهاية
+    await closeConnection(pool)
   }
 }
 
