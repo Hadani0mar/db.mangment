@@ -35,6 +35,7 @@ interface DatabaseInfo {
 }
 
 export default function SettingsPage() {
+  const router = useRouter();
   const { connection, isLoading: loadingInfo } = useDatabaseConnection();
 
   // تحويل البيانات من Supabase إلى الشكل المطلوب
